@@ -35,6 +35,7 @@ impl From<&str> for Payload {
 impl Payload {
     /// 创建一个带ack_id的payload
     pub fn with_ack_id<T: Into<Self>>(payload: T, ack_id: i32) -> Self {
+        #[allow(deprecated)]
         match payload.into() {
             Payload::Binary(data, _) => Payload::Binary(data, Some(ack_id)),
             Payload::Text(data, _) => Payload::Text(data, Some(ack_id)),
@@ -44,6 +45,7 @@ impl Payload {
 
     /// 获取payload的ack_id
     pub fn ack_id(&self) -> Option<i32> {
+        #[allow(deprecated)]
         match self {
             Payload::Binary(_, ack_id) => *ack_id,
             Payload::Text(_, ack_id) => *ack_id,
@@ -53,6 +55,7 @@ impl Payload {
 
     /// 设置payload的ack_id
     pub fn set_ack_id(&mut self, ack_id: Option<i32>) {
+        #[allow(deprecated)]
         match self {
             Payload::Binary(_, id) => *id = ack_id,
             Payload::Text(_, id) => *id = ack_id,
@@ -62,6 +65,7 @@ impl Payload {
 
     /// 获取payload的数据部分（不包含ack_id）
     pub fn data(&self) -> PayloadData<'_> {
+        #[allow(deprecated)]
         match self {
             Payload::Binary(data, _) => PayloadData::Binary(data),
             Payload::Text(data, _) => PayloadData::Text(data),
