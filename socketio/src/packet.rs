@@ -41,7 +41,7 @@ impl Packet {
         id: Option<i32>,
     ) -> Result<Packet> {
         match payload {
-            Payload::Binary(bin_data) => Ok(Packet::new(
+            Payload::Binary(bin_data, _) => Ok(Packet::new(
                 if id.is_some() {
                     PacketId::BinaryAck
                 } else {
@@ -54,7 +54,7 @@ impl Packet {
                 Some(vec![bin_data]),
             )),
             #[allow(deprecated)]
-            Payload::String(str_data) => {
+            Payload::String(str_data, _) => {
                 let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
                     format!("[\"{event}\",{str_data}]")
                 } else {
@@ -70,7 +70,7 @@ impl Packet {
                     None,
                 ))
             }
-            Payload::Text(mut data) => {
+            Payload::Text(mut data, _) => {
                 let mut payload_args = vec![serde_json::Value::String(event.to_string())];
                 payload_args.append(&mut data);
                 drop(data);
@@ -96,7 +96,7 @@ impl Packet {
         ack_id: Option<i32>,
     ) -> Result<Packet> {
         match payload {
-            Payload::Binary(bin_data) => Ok(Packet::new(
+            Payload::Binary(bin_data, _) => Ok(Packet::new(
                 PacketId::BinaryAck,
                 nsp.to_owned(),
                 None,
@@ -105,7 +105,7 @@ impl Packet {
                 Some(vec![bin_data]),
             )),
             #[allow(deprecated)]
-            Payload::String(str_data) => {
+            Payload::String(str_data, _) => {
                 let payload = if serde_json::from_str::<IgnoredAny>(&str_data).is_ok() {
                     format!("[{str_data}]")
                 } else {
@@ -121,7 +121,7 @@ impl Packet {
                     None,
                 ))
             }
-            Payload::Text(data) => {
+            Payload::Text(data, _) => {
                 let payload = serde_json::Value::Array(data).to_string();
 
                 Ok(Packet::new(
@@ -657,7 +657,7 @@ mod test {
 
     #[test]
     fn new_from_payload_binary() {
-        let payload = Payload::Binary(Bytes::from_static(&[0, 4, 9]));
+        let payload = Payload::Binary(Bytes::from_static(&[0, 4, 9]), None);
         let result =
             Packet::new_from_payload(payload.clone(), "test_event".into(), "namespace", None)
                 .unwrap();
@@ -677,7 +677,7 @@ mod test {
     #[test]
     #[allow(deprecated)]
     fn new_from_payload_string() {
-        let payload = Payload::String("test".to_owned());
+        let payload = Payload::String("test".to_owned(), None);
         let result = Packet::new_from_payload(
             payload.clone(),
             "other_event".into(),
@@ -703,7 +703,7 @@ mod test {
         let payload = Payload::Text(vec![
             serde_json::json!("String test"),
             serde_json::json!({"type":"object"}),
-        ]);
+        ], None);
         let result =
             Packet::new_from_payload(payload.clone(), "third_event".into(), "/", Some(10)).unwrap();
         assert_eq!(
@@ -721,7 +721,7 @@ mod test {
 
     #[test]
     fn ack_from_payload_binary() {
-        let payload = Payload::Binary(Bytes::from_static(&[0, 4, 9]));
+        let payload = Payload::Binary(Bytes::from_static(&[0, 4, 9]), None);
         let result = Packet::ack_from_payload(payload.clone(), "namespace", None).unwrap();
         assert_eq!(
             result,
@@ -739,7 +739,7 @@ mod test {
     #[test]
     #[allow(deprecated)]
     fn ack_from_payload_string() {
-        let payload = Payload::String("test".to_owned());
+        let payload = Payload::String("test".to_owned(), None);
         let result =
             Packet::ack_from_payload(payload.clone(), "other_namespace", Some(10)).unwrap();
         assert_eq!(
@@ -760,7 +760,7 @@ mod test {
         let payload = Payload::Text(vec![
             serde_json::json!("String test"),
             serde_json::json!({"type":"object"}),
-        ]);
+        ], None);
         let result = Packet::ack_from_payload(payload.clone(), "/", Some(10)).unwrap();
         assert_eq!(
             result,

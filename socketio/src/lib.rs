@@ -183,6 +183,13 @@ pub(self) mod socket;
 /// crate.
 pub mod error;
 
+#[cfg(test)]
+mod test_concurrent_ack;
+
+#[cfg(test)]
+#[cfg(feature = "async")]
+mod test_async_concurrent_ack;
+
 #[cfg(feature = "async")]
 /// Asynchronous version of the socket.io client. This module contains the async
 /// [`crate::asynchronous::Client`] as well as a builder

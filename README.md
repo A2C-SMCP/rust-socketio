@@ -101,12 +101,26 @@ use serde_json::json;
 
 let ack_callback = |message: Payload, socket: RawClient| {
     match message {
-        Payload::Text(values) => println!("{:#?}", values),
-        Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
-        Payload::String(str) => println!("{}", str),
+        Payload::Text(values, ack_id) => {
+            println!("{:#?}", values);
+            // Respond with the specific ack_id for concurrent ACK support
+            if let Some(id) = ack_id {
+                socket.ack_with_id(id, json!({"status": "received"})).unwrap();
+            }
+        },
+        Payload::Binary(bytes, ack_id) => {
+            println!("Received bytes: {:#?}", bytes);
+            if let Some(id) = ack_id {
+                socket.ack_with_id(id, vec![1, 2, 3]).unwrap();
+            }
+        },
+        Payload::String(str, ack_id) => {
+            println!("{}", str);
+            if let Some(id) = ack_id {
+                socket.ack_with_id(id, "response").unwrap();
+            }
+        },
     }
-    // Respond to the server's ack request
-    socket.ack(json!({"status": "received"})).unwrap();
 };
 
 let mut socket = ClientBuilder::new("http://localhost:4200/")
@@ -123,10 +137,27 @@ use serde_json::json;
 
 let callback = |payload: Payload, socket: Client| {
     async move {
-        // Process the payload
-        println!("Received: {:#?}", payload);
-        // Respond with ack
-        let _ = socket.ack(json!({"processed": true})).await;
+        match payload {
+            Payload::Text(values, ack_id) => {
+                println!("{:#?}", values);
+                // Respond with the specific ack_id for concurrent ACK support
+                if let Some(id) = ack_id {
+                    let _ = socket.ack_with_id(id, json!({"status": "received"})).await;
+                }
+            },
+            Payload::Binary(bytes, ack_id) => {
+                println!("Received bytes: {:#?}", bytes);
+                if let Some(id) = ack_id {
+                    let _ = socket.ack_with_id(id, vec![4, 5, 6]).await;
+                }
+            },
+            Payload::String(str, ack_id) => {
+                println!("{}", str);
+                if let Some(id) = ack_id {
+                    let _ = socket.ack_with_id(id, "response").await;
+                }
+            },
+        }
     }.boxed()
 };
 

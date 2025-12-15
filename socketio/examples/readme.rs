@@ -9,9 +9,9 @@ fn main() {
     let callback = |payload: Payload, socket: RawClient| {
         match payload {
             #[allow(deprecated)]
-            Payload::String(str) => println!("Received: {}", str),
-            Payload::Text(text) => println!("Received json: {:#?}", text),
-            Payload::Binary(bin_data) => println!("Received bytes: {:#?}", bin_data),
+            Payload::String(str, _) => println!("Received: {}", str),
+            Payload::Text(text, _) => println!("Received json: {:#?}", text),
+            Payload::Binary(bin_data, _) => println!("Received bytes: {:#?}", bin_data),
         }
         socket
             .emit("test", json!({"got ack": true}))

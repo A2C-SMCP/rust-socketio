@@ -36,7 +36,67 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 ## _[Unreleased]_
 
-_nothing new to show for… yet!_>
+### Breaking Changes
+- **Payload enum variants now include an optional `ack_id` field** to support concurrent acknowledgments
+  - `Payload::Binary` now takes `(Bytes, Option<i32>)` instead of just `Bytes`
+  - `Payload::Text` now takes `(Vec<Value>, Option<i32>)` instead of just `Vec<Value>`
+  - `Payload::String` now takes `(String, Option<i32>)` instead of just `String`
+  
+### Added
+- Concurrent ACK support allowing multiple acknowledgments to be processed simultaneously
+- `ack_with_id()` method on both sync and async clients for explicit ack_id specification
+- `with_ack_id()`, `ack_id()`, and `set_ack_id()` helper methods on Payload
+- Unit tests verifying concurrent ACK functionality
+
+### Changed
+- Removed single `ack_id` field from Socket implementations to eliminate race conditions
+- All callback functions now receive Payload with proper ack_id propagated from incoming packets
+- `ack()` method now uses `None` for ack_id (use `ack_with_id()` for concurrent scenarios)
+
+### Migration Guide
+To update your code for the new Payload structure:
+
+```rust
+// Old code
+match payload {
+    Payload::Text(data) => handle_text(data),
+    Payload::Binary(data) => handle_binary(data),
+    Payload::String(data) => handle_string(data),
+}
+
+// New code
+match payload {
+    Payload::Text(data, ack_id) => {
+        handle_text(data);
+        if let Some(id) = ack_id {
+            socket.ack_with_id(id, response)?;
+        }
+    },
+    Payload::Binary(data, ack_id) => {
+        handle_binary(data);
+        if let Some(id) = ack_id {
+            socket.ack_with_id(id, response)?;
+        }
+    },
+    Payload::String(data, ack_id) => {
+        handle_string(data);
+        if let Some(id) = ack_id {
+            socket.ack_with_id(id, response)?;
+        }
+    },
+}
+```
+
+For creating payloads:
+```rust
+// Old code
+let payload = Payload::Text(vec![json!("test")]);
+
+// New code
+let payload = Payload::Text(vec![json!("test")], None);
+// Or use the helper
+let payload = Payload::with_ack_id(vec![json!("test")], 42);
+```>
 
 ## <a name="060">[0.6.0] - _Multi-payload fix and http 1.0_ </a>
 

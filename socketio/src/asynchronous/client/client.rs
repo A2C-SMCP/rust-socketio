@@ -188,7 +188,7 @@ impl Client {
                         // We don't need to do that in the other cases, since proper server close
                         // and manual client close are handled explicitly.
                         if let Some(err) = client_clone
-                            .callback(&Event::Close, CloseReason::TransportClose.as_str())
+                            .callback(&Event::Close, CloseReason::TransportClose.as_str(), None)
                             .await
                             .err()
                         {
@@ -302,9 +302,27 @@ impl Client {
     ///
     ///     let callback = |payload: Payload, socket: Client| {
     ///        async move {
-    ///           let byte_test = vec![0x01, 0x02];
-    ///           let _ = socket.ack(byte_test).await;
-    ///         }.boxed()
+    ///           match payload {
+    ///               Payload::Text(values, ack_id) => {
+    ///                   println!("{:#?}", values);
+    ///                   if let Some(id) = ack_id {
+    ///                       let _ = socket.ack_with_id(id, json!({"status": "received"})).await;
+    ///                   }
+    ///               },
+    ///               Payload::Binary(bytes, ack_id) => {
+    ///                   println!("Received bytes: {:#?}", bytes);
+    ///                   if let Some(id) = ack_id {
+    ///                       let _ = socket.ack_with_id(id, vec![4, 5, 6]).await;
+    ///                   }
+    ///               },
+    ///               Payload::String(str, ack_id) => {
+    ///                   println!("{}", str);
+    ///                   if let Some(id) = ack_id {
+    ///                       let _ = socket.ack_with_id(id, "response").await;
+    ///                   }
+    ///               },
+    ///           }
+    ///        }.boxed()
     ///     };
     ///
     ///     // get a socket that is connected to the admin namespace
@@ -328,7 +346,19 @@ impl Client {
     where
         D: Into<Payload>,
     {
-        self.socket.read().await.ack(&self.nsp, data.into()).await
+        // For backward compatibility, this method doesn't specify an ack_id
+        // It should only be used when there's only one pending ack
+        let socket = self.socket.read().await;
+        socket.ack(&self.nsp, data.into(), None).await
+    }
+
+    /// Acknowledge a message with a specific ack_id
+    pub async fn ack_with_id<D>(&self, ack_id: i32, data: D) -> Result<()>
+    where
+        D: Into<Payload>,
+    {
+        let socket = self.socket.read().await;
+        socket.ack(&self.nsp, data.into(), Some(ack_id)).await
     }
 
     /// Disconnects this client from the server by sending a `socket.io` closing
@@ -456,9 +486,10 @@ impl Client {
         self.socket.read().await.send(socket_packet).await
     }
 
-    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P) -> Result<()> {
+    async fn callback<P: Into<Payload>>(&self, event: &Event, payload: P, ack_id: Option<i32>) -> Result<()> {
         let mut builder = self.builder.write().await;
-        let payload = payload.into();
+        let mut payload = payload.into();
+        payload.set_ack_id(ack_id);
 
         if let Some(callback) = builder.on.get_mut(event) {
             callback(payload.clone(), self.clone()).await;
@@ -488,16 +519,19 @@ impl Client {
 
                     if ack.time_started.elapsed() < ack.timeout {
                         if let Some(ref payload) = socket_packet.data {
+                            let mut payload = Payload::from(payload.to_owned());
+                            payload.set_ack_id(socket_packet.id);
                             ack.callback.deref_mut()(
-                                Payload::from(payload.to_owned()),
+                                payload,
                                 self.clone(),
                             )
                             .await;
                         }
                         if let Some(ref attachments) = socket_packet.attachments {
                             if let Some(payload) = attachments.get(0) {
+                                let payload = Payload::Binary(payload.to_owned(), socket_packet.id);
                                 ack.callback.deref_mut()(
-                                    Payload::Binary(payload.to_owned()),
+                                    payload,
                                     self.clone(),
                                 )
                                 .await;
@@ -526,8 +560,7 @@ impl Client {
 
         if let Some(attachments) = &packet.attachments {
             if let Some(binary_payload) = attachments.get(0) {
-                self.callback(&event, Payload::Binary(binary_payload.to_owned()))
-                    .await?;
+                self.callback(&event, Payload::Binary(binary_payload.to_owned(), packet.id), packet.id).await?;
             }
         }
         Ok(())
@@ -560,7 +593,7 @@ impl Client {
             };
 
             // call the correct callback
-            self.callback(&event, payloads.to_vec()).await?;
+            self.callback(&event, payloads.to_vec(), packet.id).await?;
         }
 
         Ok(())
@@ -575,22 +608,22 @@ impl Client {
             match packet.packet_type {
                 PacketId::Ack | PacketId::BinaryAck => {
                     if let Err(err) = self.handle_ack(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), None).await?;
                         return Err(err);
                     }
                 }
                 PacketId::BinaryEvent => {
                     if let Err(err) = self.handle_binary_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), None).await?;
                     }
                 }
                 PacketId::Connect => {
                     *(self.disconnect_reason.write().await) = DisconnectReason::default();
-                    self.callback(&Event::Connect, "").await?;
+                    self.callback(&Event::Connect, "", None).await?;
                 }
                 PacketId::Disconnect => {
                     *(self.disconnect_reason.write().await) = DisconnectReason::Server;
-                    self.callback(&Event::Close, CloseReason::IOServerDisconnect.as_str())
+                    self.callback(&Event::Close, CloseReason::IOServerDisconnect.as_str(), None)
                         .await?;
                 }
                 PacketId::ConnectError => {
@@ -601,12 +634,13 @@ impl Client {
                                 .data
                                 .as_ref()
                                 .unwrap_or(&String::from("\"No error message provided\"")),
+                        None
                     )
                     .await?;
                 }
                 PacketId::Event => {
                     if let Err(err) = self.handle_event(packet).await {
-                        self.callback(&Event::Error, err.to_string()).await?;
+                        self.callback(&Event::Error, err.to_string(), None).await?;
                     }
                 }
             }
@@ -628,7 +662,7 @@ impl Client {
                 None => None,
                 Some(Err(err)) => {
                     // call the error callback
-                    match self.callback(&Event::Error, err.to_string()).await {
+                    match self.callback(&Event::Error, err.to_string(), None).await {
                         Err(callback_err) => Some((Err(callback_err), socket)),
                         Ok(_) => Some((Err(err), socket)),
                     }
@@ -658,7 +692,6 @@ mod test {
     use futures_util::{FutureExt, StreamExt};
     use native_tls::TlsConnector;
     use serde_json::json;
-    use serial_test::serial;
     use tokio::{
         sync::{mpsc, Mutex},
         time::{sleep, timeout},
@@ -682,10 +715,10 @@ mod test {
             .on("test", |msg, _| {
                 async {
                     match msg {
-                        Payload::Text(values) => println!("Received json: {:#?}", values),
+                        Payload::Text(values, _) => println!("Received json: {:#?}", values),
                         #[allow(deprecated)]
-                        Payload::String(str) => println!("Received string: {}", str),
-                        Payload::Binary(bin) => println!("Received binary data: {:#?}", bin),
+                        Payload::String(str, _) => println!("Received string: {}", str),
+                        Payload::Binary(bin, _) => println!("Received binary data: {:#?}", bin),
                     }
                 }
                 .boxed()
@@ -711,7 +744,7 @@ mod test {
                         assert!(result.is_ok());
 
                         println!("Yehaa! My ack got acked?");
-                        if let Payload::Text(json) = message {
+                        if let Payload::Text(json, _) = message {
                             println!("Received json Ack");
                             println!("Ack data: {:#?}", json);
                         }
@@ -866,7 +899,7 @@ mod test {
                     MESSAGE_NUM.fetch_add(1, Ordering::Release);
 
                     let msg = match payload {
-                        Payload::Text(msg) => msg
+                        Payload::Text(msg, _) => msg
                             .into_iter()
                             .next()
                             .expect("there should be one text payload"),
@@ -984,7 +1017,7 @@ mod test {
             .on_any(move |event, payload, _| {
                 let clone_tx = tx.clone();
                 async move {
-                    if let Payload::Text(values) = payload {
+                    if let Payload::Text(values, _) = payload {
                         println!("{event}: {values:#?}");
                     }
                     clone_tx.send(String::from(event)).await.unwrap();
@@ -1245,7 +1278,7 @@ mod test {
         let cb = |message: Payload, _| {
             async {
                 println!("Yehaa! My ack got acked?");
-                if let Payload::Text(values) = message {
+                if let Payload::Text(values, _) = message {
                     println!("Received json ack");
                     println!("Ack data: {:#?}", values);
                 }
