@@ -88,6 +88,57 @@ Here's an overview of possible use-cases:
 handling).
 - send JSON data to the server and receive an `ack`.
 - send and handle Binary data.
+- **respond to server's `emitWithAck` calls with client-side ack messages**.
+
+### Server-to-Client ACK Support
+
+This crate now supports responding to server's `emitWithAck` calls. When the server emits an event with an acknowledgment request, the client can respond using the `ack` method:
+
+#### Sync Example:
+```rust
+use rust_socketio::{ClientBuilder, Payload, RawClient};
+use serde_json::json;
+
+let ack_callback = |message: Payload, socket: RawClient| {
+    match message {
+        Payload::Text(values) => println!("{:#?}", values),
+        Payload::Binary(bytes) => println!("Received bytes: {:#?}", bytes),
+        Payload::String(str) => println!("{}", str),
+    }
+    // Respond to the server's ack request
+    socket.ack(json!({"status": "received"})).unwrap();
+};
+
+let mut socket = ClientBuilder::new("http://localhost:4200/")
+    .on("messageWithAck", ack_callback)
+    .connect()
+    .expect("connection failed");
+```
+
+#### Async Example:
+```rust
+use futures_util::FutureExt;
+use rust_socketio::{asynchronous::{Client, ClientBuilder}, Payload};
+use serde_json::json;
+
+let callback = |payload: Payload, socket: Client| {
+    async move {
+        // Process the payload
+        println!("Received: {:#?}", payload);
+        // Respond with ack
+        let _ = socket.ack(json!({"processed": true})).await;
+    }.boxed()
+};
+
+let socket = ClientBuilder::new("http://localhost:4200")
+    .namespace("/")
+    .on("serverEvent", callback)
+    .connect()
+    .await
+    .expect("Connection failed");
+```
+
+**Note**: The client maintains only the most recent ack ID. If multiple ack-eligible messages are received in quick succession, only the last one can be acknowledged.
 
 ## <a name="async"> Async version
 This library provides an ability for being executed in an asynchronous context using `tokio` as
